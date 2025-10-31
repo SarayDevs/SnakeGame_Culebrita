@@ -3,13 +3,14 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Snake - Culebrita</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -20,6 +21,8 @@
             min-height: 100vh;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: Arial, sans-serif;
+            touch-action: manipulation;
+            overflow: hidden;
         }
 
         .container {
@@ -35,6 +38,7 @@
             .container {
                 padding: 15px;
                 margin: 10px;
+                width: calc(100% - 20px);
             }
 
             #gameCanvas {
@@ -47,6 +51,7 @@
             text-align: center;
             color: #333;
             margin-bottom: 10px;
+            font-size: clamp(20px, 5vw, 28px);
         }
 
         .score-board {
@@ -76,6 +81,7 @@
             background: #f8f8f8;
             max-width: 100%;
             height: auto;
+            touch-action: none;
         }
 
         .controls {
@@ -89,6 +95,9 @@
             display: none;
             margin-top: 20px;
             user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
         }
 
         .touch-controls.active {
@@ -99,31 +108,38 @@
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             grid-template-rows: repeat(3, 1fr);
-            gap: 10px;
-            max-width: 200px;
+            gap: 15px;
+            max-width: 250px;
             margin: 0 auto;
+            padding: 10px;
         }
 
         .control-btn {
-            width: 60px;
-            height: 60px;
+            width: 70px;
+            height: 70px;
             border: none;
-            border-radius: 10px;
+            border-radius: 15px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            font-size: 24px;
+            font-size: 30px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-            transition: transform 0.1s, box-shadow 0.1s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            transition: transform 0.1s, box-shadow 0.1s, opacity 0.1s;
+            touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
+            position: relative;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
-        .control-btn:active {
-            transform: scale(0.9);
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        .control-btn:active,
+        .control-btn.pressed {
+            transform: scale(0.85);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            opacity: 0.8;
         }
 
         .control-btn.up {
@@ -150,6 +166,7 @@
             background: transparent;
             box-shadow: none;
             cursor: default;
+            pointer-events: none;
         }
 
         .control-btn.empty:active {
@@ -162,9 +179,22 @@
             }
         }
 
+        @media (max-width: 480px) {
+            .control-btn {
+                width: 65px;
+                height: 65px;
+                font-size: 28px;
+            }
+
+            .controls-grid {
+                max-width: 230px;
+                gap: 12px;
+            }
+        }
+
         .game-over {
             display: none;
-            position: absolute;
+            position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
@@ -173,6 +203,7 @@
             border-radius: 10px;
             text-align: center;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
         }
 
         .game-over h2 {
@@ -182,16 +213,18 @@
 
         .game-over button {
             margin-top: 15px;
-            padding: 10px 20px;
+            padding: 12px 24px;
             font-size: 16px;
             background: #667eea;
             color: white;
             border: none;
             border-radius: 5px;
             cursor: pointer;
+            touch-action: manipulation;
         }
 
-        .game-over button:hover {
+        .game-over button:hover,
+        .game-over button:active {
             background: #5568d3;
         }
     </style>
@@ -211,13 +244,13 @@
         <div class="touch-controls" id="touchControls">
             <div class="controls-grid">
                 <button class="control-btn empty"></button>
-                <button class="control-btn up">▲</button>
+                <button class="control-btn up" data-direction="up">▲</button>
                 <button class="control-btn empty"></button>
-                <button class="control-btn left">◄</button>
+                <button class="control-btn left" data-direction="left">◄</button>
                 <button class="control-btn empty"></button>
-                <button class="control-btn right">►</button>
+                <button class="control-btn right" data-direction="right">►</button>
                 <button class="control-btn empty"></button>
-                <button class="control-btn down">▼</button>
+                <button class="control-btn down" data-direction="down">▼</button>
                 <button class="control-btn empty"></button>
             </div>
         </div>
@@ -570,8 +603,26 @@
             }
         });
 
-        // Controles táctiles
+        // Controles táctiles mejorados
         const touchControls = document.getElementById('touchControls');
+        const directionButtons = {
+            'up': {
+                dx: 0,
+                dy: -1
+            },
+            'down': {
+                dx: 0,
+                dy: 1
+            },
+            'left': {
+                dx: -1,
+                dy: 0
+            },
+            'right': {
+                dx: 1,
+                dy: 0
+            }
+        };
 
         // Detectar si es móvil/tablet
         function isMobileDevice() {
@@ -584,36 +635,89 @@
             touchControls.classList.add('active');
         }
 
-        // Event listeners para botones táctiles
-        document.querySelector('.control-btn.up').addEventListener('click', (e) => {
-            e.preventDefault();
-            handleDirectionChange(0, -1);
-        });
+        // Función para manejar toques en botones
+        function setupTouchButton(button, direction) {
+            const dir = directionButtons[direction];
 
-        document.querySelector('.control-btn.down').addEventListener('click', (e) => {
-            e.preventDefault();
-            handleDirectionChange(0, 1);
-        });
-
-        document.querySelector('.control-btn.left').addEventListener('click', (e) => {
-            e.preventDefault();
-            handleDirectionChange(-1, 0);
-        });
-
-        document.querySelector('.control-btn.right').addEventListener('click', (e) => {
-            e.preventDefault();
-            handleDirectionChange(1, 0);
-        });
-
-        // Prevenir scroll en móvil al tocar los botones
-        document.querySelectorAll('.control-btn').forEach(btn => {
-            btn.addEventListener('touchstart', (e) => {
+            // Evento touchstart (inicio del toque)
+            button.addEventListener('touchstart', function(e) {
                 e.preventDefault();
+                e.stopPropagation();
+                if (gameRunning) {
+                    button.classList.add('pressed');
+                    handleDirectionChange(dir.dx, dir.dy);
+                }
+            }, {
+                passive: false
             });
-            btn.addEventListener('touchend', (e) => {
+
+            // Evento touchend (fin del toque)
+            button.addEventListener('touchend', function(e) {
                 e.preventDefault();
+                e.stopPropagation();
+                button.classList.remove('pressed');
+            }, {
+                passive: false
             });
+
+            // Evento touchcancel (toque cancelado)
+            button.addEventListener('touchcancel', function(e) {
+                e.preventDefault();
+                button.classList.remove('pressed');
+            }, {
+                passive: false
+            });
+
+            // También soporte para clic (para emuladores de escritorio)
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (gameRunning) {
+                    handleDirectionChange(dir.dx, dir.dy);
+                }
+            });
+
+            // Prevenir scroll y zoom
+            button.addEventListener('touchmove', function(e) {
+                e.preventDefault();
+            }, {
+                passive: false
+            });
+        }
+
+        // Configurar todos los botones de dirección
+        document.querySelectorAll('.control-btn[data-direction]').forEach(button => {
+            const direction = button.getAttribute('data-direction');
+            setupTouchButton(button, direction);
         });
+
+        // Prevenir acciones por defecto del navegador en el canvas
+        canvas.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        canvas.addEventListener('touchmove', function(e) {
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        canvas.addEventListener('touchend', function(e) {
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        // Prevenir zoom con doble toque
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function(e) {
+            const now = Date.now();
+            if (now - lastTouchEnd <= 300) {
+                e.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
 
         // Iniciar juego
         generateFood();
