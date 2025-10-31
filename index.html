@@ -27,6 +27,20 @@
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+                margin: 10px;
+            }
+
+            #gameCanvas {
+                width: 100%;
+                max-width: 400px;
+            }
         }
 
         h1 {
@@ -60,6 +74,8 @@
             border: 3px solid #333;
             display: block;
             background: #f8f8f8;
+            max-width: 100%;
+            height: auto;
         }
 
         .controls {
@@ -67,6 +83,83 @@
             margin-top: 15px;
             color: #666;
             font-size: 14px;
+        }
+
+        .touch-controls {
+            display: none;
+            margin-top: 20px;
+            user-select: none;
+        }
+
+        .touch-controls.active {
+            display: block;
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 200px;
+            margin: 0 auto;
+        }
+
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            transition: transform 0.1s, box-shadow 0.1s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .control-btn:active {
+            transform: scale(0.9);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .control-btn.up {
+            grid-column: 2;
+            grid-row: 1;
+        }
+
+        .control-btn.down {
+            grid-column: 2;
+            grid-row: 3;
+        }
+
+        .control-btn.left {
+            grid-column: 1;
+            grid-row: 2;
+        }
+
+        .control-btn.right {
+            grid-column: 3;
+            grid-row: 2;
+        }
+
+        .control-btn.empty {
+            background: transparent;
+            box-shadow: none;
+            cursor: default;
+        }
+
+        .control-btn.empty:active {
+            transform: none;
+        }
+
+        @media (min-width: 769px) {
+            .touch-controls {
+                display: none !important;
+            }
         }
 
         .game-over {
@@ -115,6 +208,19 @@
         <div class="controls">
             Usa las flechas del teclado para mover la serpiente
         </div>
+        <div class="touch-controls" id="touchControls">
+            <div class="controls-grid">
+                <button class="control-btn empty"></button>
+                <button class="control-btn up">▲</button>
+                <button class="control-btn empty"></button>
+                <button class="control-btn left">◄</button>
+                <button class="control-btn empty"></button>
+                <button class="control-btn right">►</button>
+                <button class="control-btn empty"></button>
+                <button class="control-btn down">▼</button>
+                <button class="control-btn empty"></button>
+            </div>
+        </div>
     </div>
 
     <div class="game-over" id="gameOver">
@@ -146,7 +252,11 @@
         let highScore = localStorage.getItem('snakeHighScore') || 0;
         let gameRunning = true;
         let gameInterval = null;
-        let baseSpeed = 200; // Velocidad base en milisegundos
+        let baseSpeed = 200; // Velocidad base en milisegundos (200ms inicial)
+        let nextDirection = {
+            dx: 0,
+            dy: 0
+        }; // Dirección pendiente para evitar cambios múltiples en un ciclo
 
         // Mostrar mejor puntaje
         highScoreElement.textContent = highScore;
@@ -292,9 +402,40 @@
             ctx.closePath();
         }
 
+        // Cambiar dirección (mejora para evitar errores)
+        function changeDirection(newDx, newDy) {
+            // Si es la primera dirección, aplicar inmediatamente
+            if (dx === 0 && dy === 0) {
+                dx = newDx;
+                dy = newDy;
+                return;
+            }
+
+            // Para direcciones subsecuentes, guardar para el próximo ciclo
+            // Esto previene cambios múltiples en un solo frame
+            nextDirection.dx = newDx;
+            nextDirection.dy = newDy;
+        }
+
         // Mover serpiente
         function moveSnake() {
             if (!gameRunning) return;
+
+            // Aplicar dirección pendiente al inicio del movimiento
+            if (nextDirection.dx !== 0 || nextDirection.dy !== 0) {
+                // Validar que no sea dirección opuesta (solo si hay cuerpo)
+                if (snake.length === 1 ||
+                    !(nextDirection.dx === -dx && nextDirection.dy === -dy)) {
+                    dx = nextDirection.dx;
+                    dy = nextDirection.dy;
+                    nextDirection.dx = 0;
+                    nextDirection.dy = 0;
+                } else {
+                    // Si es dirección opuesta y hay cuerpo, ignorar el cambio
+                    nextDirection.dx = 0;
+                    nextDirection.dy = 0;
+                }
+            }
 
             // No mover si no hay dirección definida
             if (dx === 0 && dy === 0) {
@@ -307,17 +448,22 @@
                 y: snake[0].y + dy
             };
 
-            // Verificar colisión con paredes
+            // Verificar colisión con paredes (con límites exactos)
             if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
                 endGame();
                 return;
             }
 
-            // Verificar colisión consigo misma (saltar la cabeza)
-            for (let i = 1; i < snake.length; i++) {
-                if (head.x === snake[i].x && head.y === snake[i].y) {
-                    endGame();
-                    return;
+            // Verificar colisión consigo misma
+            // Solo verificar contra el cuerpo (excluyendo la cola que será eliminada)
+            if (snake.length > 1) {
+                // Verificar contra todos los segmentos excepto el último (la cola)
+                // porque la cola se moverá cuando la cabeza avance
+                for (let i = 0; i < snake.length - 1; i++) {
+                    if (head.x === snake[i].x && head.y === snake[i].y) {
+                        endGame();
+                        return;
+                    }
                 }
             }
 
@@ -331,7 +477,7 @@
 
                 // Aumentar velocidad (reducir intervalo en 100ms = 0.1s)
                 clearInterval(gameInterval);
-                baseSpeed = Math.max(150, baseSpeed - 200); // Mínimo 50ms
+                baseSpeed = Math.max(50, baseSpeed - 100); // Mínimo 50ms
                 startGameLoop();
             } else {
                 snake.pop();
@@ -374,14 +520,30 @@
             }];
             dx = 0;
             dy = 0;
+            nextDirection.dx = 0;
+            nextDirection.dy = 0;
             score = 0;
             scoreElement.textContent = score;
-            baseSpeed = 150; // Resetear velocidad
+            baseSpeed = 200; // Resetear velocidad a 200ms
             gameRunning = true;
             gameOverElement.style.display = 'none';
             generateFood();
             drawGame();
             startGameLoop();
+        }
+
+        // Función para manejar cambios de dirección
+        function handleDirectionChange(newDx, newDy) {
+            if (!gameRunning) return;
+
+            // Prevenir movimiento opuesto si hay cuerpo
+            if (snake.length > 1) {
+                if ((newDx === -dx && newDy === -dy) && (dx !== 0 || dy !== 0)) {
+                    return; // No cambiar a dirección opuesta
+                }
+            }
+
+            changeDirection(newDx, newDy);
         }
 
         // Control del teclado
@@ -390,30 +552,67 @@
 
             switch (e.key) {
                 case 'ArrowUp':
-                    if (dy !== 1) {
-                        dx = 0;
-                        dy = -1;
-                    }
+                    handleDirectionChange(0, -1);
+                    e.preventDefault();
                     break;
                 case 'ArrowDown':
-                    if (dy !== -1) {
-                        dx = 0;
-                        dy = 1;
-                    }
+                    handleDirectionChange(0, 1);
+                    e.preventDefault();
                     break;
                 case 'ArrowLeft':
-                    if (dx !== 1) {
-                        dx = -1;
-                        dy = 0;
-                    }
+                    handleDirectionChange(-1, 0);
+                    e.preventDefault();
                     break;
                 case 'ArrowRight':
-                    if (dx !== -1) {
-                        dx = 1;
-                        dy = 0;
-                    }
+                    handleDirectionChange(1, 0);
+                    e.preventDefault();
                     break;
             }
+        });
+
+        // Controles táctiles
+        const touchControls = document.getElementById('touchControls');
+
+        // Detectar si es móvil/tablet
+        function isMobileDevice() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                (window.innerWidth <= 768 && 'ontouchstart' in window);
+        }
+
+        // Mostrar controles táctiles en dispositivos móviles
+        if (isMobileDevice()) {
+            touchControls.classList.add('active');
+        }
+
+        // Event listeners para botones táctiles
+        document.querySelector('.control-btn.up').addEventListener('click', (e) => {
+            e.preventDefault();
+            handleDirectionChange(0, -1);
+        });
+
+        document.querySelector('.control-btn.down').addEventListener('click', (e) => {
+            e.preventDefault();
+            handleDirectionChange(0, 1);
+        });
+
+        document.querySelector('.control-btn.left').addEventListener('click', (e) => {
+            e.preventDefault();
+            handleDirectionChange(-1, 0);
+        });
+
+        document.querySelector('.control-btn.right').addEventListener('click', (e) => {
+            e.preventDefault();
+            handleDirectionChange(1, 0);
+        });
+
+        // Prevenir scroll en móvil al tocar los botones
+        document.querySelectorAll('.control-btn').forEach(btn => {
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+            });
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+            });
         });
 
         // Iniciar juego
