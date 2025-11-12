@@ -15,14 +15,16 @@
 
         body {
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             min-height: 100vh;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             font-family: Arial, sans-serif;
             touch-action: manipulation;
-            overflow: hidden;
+            overflow-x: auto;
+            padding: 20px;
+            gap: 20px;
         }
 
         .container {
@@ -32,13 +34,99 @@
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
             max-width: 100%;
             box-sizing: border-box;
+            flex-shrink: 0;
+            margin-left: 280px; /* Espacio para el widget de la cámara */
+        }
+
+        /* Widget de la cámara */
+        .camera-widget {
+            position: fixed;
+            left: 20px;
+            top: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+            z-index: 100;
+            min-width: 220px;
+            max-width: 250px;
+        }
+
+        .camera-widget h3 {
+            margin: 0 0 10px 0;
+            color: #333;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .camera-widget button {
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background 0.3s;
+        }
+
+        .camera-widget button:hover {
+            background: #5568d3;
+        }
+
+        .camera-widget button.active {
+            background: #4CAF50;
+        }
+
+        #webcam-container {
+            margin: 10px 0;
+            text-align: center;
+        }
+
+        #webcam-container canvas {
+            border: 2px solid #667eea;
+            border-radius: 5px;
+            max-width: 100%;
+        }
+
+        #label-container {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+            text-align: left;
+        }
+
+        #label-container div {
+            padding: 3px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        #label-container div:last-child {
+            border-bottom: none;
         }
 
         @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .camera-widget {
+                position: relative;
+                left: auto;
+                top: auto;
+                width: calc(100% - 40px);
+                max-width: 400px;
+                margin-bottom: 20px;
+            }
+
             .container {
                 padding: 15px;
-                margin: 10px;
-                width: calc(100% - 20px);
+                margin: 0;
+                margin-left: 0;
+                width: calc(100% - 40px);
             }
 
             #gameCanvas {
@@ -231,6 +319,16 @@
 </head>
 
 <body>
+    <!-- Widget de la cámara (lado izquierdo) -->
+    <div class="camera-widget">
+        <h3>🎥 Control por Gestos</h3>
+        <button type="button" id="startTM">
+            Iniciar Control por Gestos
+        </button>
+        <div id="webcam-container" style="display: none;"></div>
+        <div id="label-container" style="display: none;"></div>
+    </div>
+
     <div class="container">
         <h1>🐍 Snake - Culebrita</h1>
         <div class="score-board">
@@ -285,7 +383,7 @@
         let highScore = localStorage.getItem('snakeHighScore') || 0;
         let gameRunning = true;
         let gameInterval = null;
-        let baseSpeed = 200; // Velocidad base en milisegundos (200ms inicial)
+        let baseSpeed = 400; // Velocidad base en milisegundos (400ms - más lento para control por gestos)
         let nextDirection = {
             dx: 0,
             dy: 0
@@ -557,7 +655,7 @@
             nextDirection.dy = 0;
             score = 0;
             scoreElement.textContent = score;
-            baseSpeed = 200; // Resetear velocidad a 200ms
+            baseSpeed = 400; // Resetear velocidad a 400ms
             gameRunning = true;
             gameOverElement.style.display = 'none';
             generateFood();
@@ -565,8 +663,8 @@
             startGameLoop();
         }
 
-        // Función para manejar cambios de dirección
-        function handleDirectionChange(newDx, newDy) {
+        // Función para manejar cambios de dirección (disponible globalmente)
+        window.handleDirectionChange = function(newDx, newDy) {
             if (!gameRunning) return;
 
             // Prevenir movimiento opuesto si hay cuerpo
@@ -723,6 +821,116 @@
         generateFood();
         drawGame();
         startGameLoop();
+    </script>
+
+    <!-- Scripts de TensorFlow y Teachable Machine -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+    <script type="text/javascript">
+        // Variables para Teachable Machine
+        const URL = "./tm-my-image-model/";
+        let model, webcam, labelContainer, maxPredictions;
+        let tmInitialized = false;
+        const CONFIDENCE_THRESHOLD = 0.85; // 85% de confianza requerida
+
+        // Mapeo de clases a direcciones
+        const classToDirection = {
+            'arriba': { dx: 0, dy: -1 },
+            'abajo': { dx: 0, dy: 1 },
+            'izquierda': { dx: -1, dy: 0 },
+            'derecha': { dx: 1, dy: 0 }
+        };
+
+        // Función para inicializar Teachable Machine
+        async function initTM() {
+            try {
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+
+                // Cargar el modelo y metadata
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                // Configurar webcam
+                const flip = true; // Voltear la webcam
+                webcam = new tmImage.Webcam(200, 200, flip); // width, height, flip
+                await webcam.setup(); // Solicitar acceso a la webcam
+                await webcam.play();
+                window.requestAnimationFrame(loop);
+
+                // Agregar elementos al DOM
+                const webcamContainer = document.getElementById("webcam-container");
+                webcamContainer.appendChild(webcam.canvas);
+                webcamContainer.style.display = "block";
+
+                labelContainer = document.getElementById("label-container");
+                labelContainer.style.display = "block";
+                
+                for (let i = 0; i < maxPredictions; i++) {
+                    labelContainer.appendChild(document.createElement("div"));
+                }
+
+                tmInitialized = true;
+                const startButton = document.getElementById("startTM");
+                startButton.textContent = "Control por Gestos Activo";
+                startButton.classList.add("active");
+            } catch (error) {
+                console.error("Error al inicializar Teachable Machine:", error);
+                alert("Error al inicializar la cámara. Por favor, asegúrate de permitir el acceso a la cámara.");
+            }
+        }
+
+        // Bucle de predicción
+        async function loop() {
+            if (!tmInitialized) return;
+            
+            webcam.update(); // Actualizar el frame de la webcam
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        // Función de predicción
+        async function predict() {
+            if (!model || !webcam || !gameRunning) return;
+
+            // Predecir usando el canvas de la webcam
+            const prediction = await model.predict(webcam.canvas);
+            
+            let maxProbability = 0;
+            let predictedClass = null;
+
+            // Encontrar la clase con mayor probabilidad
+            for (let i = 0; i < maxPredictions; i++) {
+                const classPrediction = prediction[i].className + ": " + (prediction[i].probability * 100).toFixed(2) + "%";
+                
+                // Actualizar etiquetas en el DOM
+                if (labelContainer && labelContainer.childNodes[i]) {
+                    labelContainer.childNodes[i].innerHTML = classPrediction;
+                }
+
+                // Verificar si esta clase tiene la mayor probabilidad y supera el umbral
+                if (prediction[i].probability > maxProbability) {
+                    maxProbability = prediction[i].probability;
+                    predictedClass = prediction[i].className;
+                }
+            }
+
+            // Solo aplicar el movimiento si la confianza es >= 85%
+            if (maxProbability >= CONFIDENCE_THRESHOLD && predictedClass && classToDirection[predictedClass]) {
+                const direction = classToDirection[predictedClass];
+                if (window.handleDirectionChange) {
+                    window.handleDirectionChange(direction.dx, direction.dy);
+                }
+            }
+        }
+
+        // Event listener para el botón de inicio
+        document.getElementById("startTM").addEventListener("click", function() {
+            if (!tmInitialized) {
+                initTM();
+            }
+        });
     </script>
 </body>
 
